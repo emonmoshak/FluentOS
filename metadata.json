@@ -1,0 +1,7 @@
+{
+  "name": "FluentOS",
+  "description": "A minimalist, voice-first English practice AI.",
+  "requestFramePermissions": [
+    "microphone"
+  ]
+}
