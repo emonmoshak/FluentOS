@@ -8,11 +8,10 @@ const MODEL_NAME = 'gemini-2.5-flash-native-audio-preview-09-2025';
 
 interface UseLiveSessionProps {
   userProfile: UserProfile;
-  onDisconnect: () => void;
   isMicOn: boolean;
 }
 
-export const useLiveSession = ({ userProfile, onDisconnect, isMicOn }: UseLiveSessionProps) => {
+export const useLiveSession = ({ userProfile, isMicOn }: UseLiveSessionProps) => {
   const [isConnected, setIsConnected] = useState(false);
   const [isSpeaking, setIsSpeaking] = useState(false); // Model is speaking
   const [volume, setVolume] = useState(0); // For visualizer

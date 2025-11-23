@@ -1,4 +1,3 @@
-
 import React, { useEffect, useState } from 'react';
 import { Mic, MicOff, X, RefreshCw } from 'lucide-react';
 import { useLiveSession } from '../hooks/useLiveSession';
@@ -16,15 +15,6 @@ export const Session: React.FC<SessionProps> = ({ userProfile, setAppState, onSe
   const [showEndConfirm, setShowEndConfirm] = useState(false);
   const [duration, setDuration] = useState(0);
   
-  // Pass transcript data up when disconnecting via error or other means
-  const handleDisconnect = () => {
-    // We can't easily access transcripts here without them being in scope, 
-    // but since we are inside the component, we can use the current render's data.
-    // However, onDisconnect in useLiveSession might be called when this component unmounts or errors.
-    // For now, we rely on manual exit or handleEndSession.
-    setAppState(AppState.SUMMARY);
-  };
-
   const { 
     isConnected, 
     isSpeaking, 
@@ -35,7 +25,6 @@ export const Session: React.FC<SessionProps> = ({ userProfile, setAppState, onSe
     disconnect 
   } = useLiveSession({
     userProfile,
-    onDisconnect: handleDisconnect,
     isMicOn: micEnabled
   });
 
