@@ -42,7 +42,7 @@ const App: React.FC = () => {
                 </button>
                 
                 <div className="mt-16 text-xs text-gray-400 uppercase tracking-widest">
-                    powered by gemini 2.5 flash
+                    Developed By Md Emon Mosahk
                 </div>
             </main>
           </div>
