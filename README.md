@@ -3,7 +3,7 @@
 > **Speak freely. Fluent forever.**  
 > A minimalist, voice-first AI English conversation partner powered by Google's Gemini 2.5 Flash.
 
-[![Live Demo](https://img.shields.io/badge/demo-live%20app-yellow?style=for-the-badge&logo=vercel)](https://your-project-name.vercel.app) 
+[![Live Demo](https://img.shields.io/badge/demo-live%20app-yellow?style=for-the-badge&logo=vercel)](https://fluent-os-9fev.vercel.app/) 
 [![License](https://img.shields.io/badge/license-MIT-black?style=for-the-badge)](LICENSE)
 
 ---
@@ -49,8 +49,8 @@
 
 1.  **Clone the repository**
     ```bash
-    git clone https://github.com/yourusername/fluent-os.git
-    cd fluent-os
+    git clone https://github.com/emonmoshak/FluentOS.git
+    cd FluentOS
     ```
 
 2.  **Install dependencies**
@@ -87,8 +87,8 @@ This project is optimized for deployment on **Vercel**.
 
 **Md Emon Mosahk**
 
--   [GitHub Profile](https://github.com/yourusername)
--   [LinkedIn](https://linkedin.com/in/yourusername)
+-   [GitHub Profile](https://github.com/emonmoshak)
+-   [LinkedIn](https://www.linkedin.com/in/emonmoshak/)
 
 ---
 
