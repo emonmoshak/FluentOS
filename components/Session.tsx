@@ -1,19 +1,27 @@
+
 import React, { useEffect, useState } from 'react';
-import { Mic, MicOff, X, Square, RefreshCw } from 'lucide-react';
+import { Mic, MicOff, X, RefreshCw } from 'lucide-react';
 import { useLiveSession } from '../hooks/useLiveSession';
-import { UserProfile, AppState } from '../types';
+import { UserProfile, AppState, SessionStats } from '../types';
 import { BlobVisualizer } from './BlobVisualizer';
 
 interface SessionProps {
   userProfile: UserProfile;
   setAppState: (state: AppState) => void;
+  onSessionEnd: (stats: SessionStats) => void;
 }
 
-export const Session: React.FC<SessionProps> = ({ userProfile, setAppState }) => {
+export const Session: React.FC<SessionProps> = ({ userProfile, setAppState, onSessionEnd }) => {
   const [micEnabled, setMicEnabled] = useState(true);
   const [showEndConfirm, setShowEndConfirm] = useState(false);
+  const [duration, setDuration] = useState(0);
   
+  // Pass transcript data up when disconnecting via error or other means
   const handleDisconnect = () => {
+    // We can't easily access transcripts here without them being in scope, 
+    // but since we are inside the component, we can use the current render's data.
+    // However, onDisconnect in useLiveSession might be called when this component unmounts or errors.
+    // For now, we rely on manual exit or handleEndSession.
     setAppState(AppState.SUMMARY);
   };
 
@@ -27,7 +35,8 @@ export const Session: React.FC<SessionProps> = ({ userProfile, setAppState }) =>
     disconnect 
   } = useLiveSession({
     userProfile,
-    onDisconnect: handleDisconnect
+    onDisconnect: handleDisconnect,
+    isMicOn: micEnabled
   });
 
   // Initial Connection
@@ -37,22 +46,42 @@ export const Session: React.FC<SessionProps> = ({ userProfile, setAppState }) =>
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  // Timer Logic
+  useEffect(() => {
+    let interval: number;
+    if (isConnected) {
+      interval = window.setInterval(() => {
+        setDuration(prev => prev + 1);
+      }, 1000);
+    }
+    return () => clearInterval(interval);
+  }, [isConnected]);
+
+  const formatTime = (seconds: number) => {
+    const mins = Math.floor(seconds / 60);
+    const secs = seconds % 60;
+    return `${mins}:${secs.toString().padStart(2, '0')}`;
+  };
+
   const toggleMic = () => {
     setMicEnabled(!micEnabled);
-    // Note: In a production app, this should actually mute the MediaStreamTrack
   };
 
   const handleEndSession = () => {
+      onSessionEnd({ duration, transcripts });
       disconnect();
       setAppState(AppState.SUMMARY);
   };
 
   const handleRetry = () => {
+      setDuration(0);
       disconnect(); // Ensure clean state
       connect(); // Retry connection
   };
 
   if (error) {
+    const isPermissionError = error.toLowerCase().includes('permission') || error.toLowerCase().includes('microphone');
+
     return (
         <div className="flex flex-col items-center justify-center h-screen p-6 bg-white text-center">
             <div className="w-16 h-16 bg-red-50 rounded-full flex items-center justify-center mb-6">
@@ -60,6 +89,18 @@ export const Session: React.FC<SessionProps> = ({ userProfile, setAppState }) =>
             </div>
             <h3 className="text-xl font-semibold text-gray-900 mb-2">Connection Issue</h3>
             <p className="text-gray-500 mb-8 max-w-xs">{error}</p>
+
+            {isPermissionError && (
+                <div className="bg-yellow-50 border border-yellow-100 rounded-lg p-4 mb-8 max-w-sm text-sm text-yellow-800 text-left">
+                    <p className="font-semibold mb-1">How to fix:</p>
+                    <ul className="list-disc pl-4 space-y-1">
+                        <li>Check your browser address bar for a blocked camera/mic icon.</li>
+                        <li>Click it and allow microphone access.</li>
+                        <li>Reload the page.</li>
+                    </ul>
+                </div>
+            )}
+
             <div className="flex gap-4">
                 <button 
                     onClick={() => setAppState(AppState.LANDING)}
@@ -78,13 +119,30 @@ export const Session: React.FC<SessionProps> = ({ userProfile, setAppState }) =>
     )
   }
 
+  // Determine visual state
+  const visualizerState = !isConnected 
+    ? 'connecting' 
+    : isSpeaking 
+        ? 'speaking' 
+        : !micEnabled 
+            ? 'muted' 
+            : 'listening';
+
   return (
     <div className="flex flex-col h-screen w-full bg-[#FAFAFA] relative overflow-hidden">
       
       {/* Header */}
       <div className="absolute top-0 left-0 w-full p-6 flex justify-between items-center z-20">
-        <div className="text-gray-400 text-sm font-medium tracking-wide uppercase">
-            {isSpeaking ? 'FluentOS Speaking...' : 'Listening...'}
+        <div className="flex items-center gap-4 text-gray-400 text-sm font-medium tracking-wide uppercase">
+            {isConnected && (
+                <>
+                    <span className="tabular-nums text-gray-600 font-semibold">{formatTime(duration)}</span>
+                    <span className="w-1 h-1 bg-gray-300 rounded-full"></span>
+                </>
+            )}
+            <span className={isConnected ? "" : "animate-pulse"}>
+                {isConnected ? (isSpeaking ? 'FluentOS Speaking...' : (!micEnabled ? 'Microphone Muted' : 'Listening...')) : 'Connecting...'}
+            </span>
         </div>
         <button 
             onClick={() => setShowEndConfirm(true)}
@@ -131,7 +189,7 @@ export const Session: React.FC<SessionProps> = ({ userProfile, setAppState }) =>
 
         <BlobVisualizer 
             volume={volume} 
-            state={!isConnected ? 'connecting' : isSpeaking ? 'speaking' : 'listening'} 
+            state={visualizerState} 
         />
 
         {/* Subtitles / Last transcript */}
@@ -146,13 +204,27 @@ export const Session: React.FC<SessionProps> = ({ userProfile, setAppState }) =>
       </div>
 
       {/* Controls */}
-      <div className="absolute bottom-12 left-0 w-full flex justify-center items-center gap-6 z-20">
-        <button 
-            onClick={toggleMic}
-            className={`p-4 rounded-full shadow-sm transition-all duration-200 ${micEnabled ? 'bg-white hover:bg-gray-50 text-gray-800' : 'bg-red-50 text-red-500'}`}
-        >
-            {micEnabled ? <Mic className="w-6 h-6" /> : <MicOff className="w-6 h-6" />}
-        </button>
+      <div className="absolute bottom-12 left-0 w-full flex flex-col justify-center items-center gap-4 z-20">
+        
+        {/* Muted Indicator Pill */}
+        {!micEnabled && isConnected && (
+            <div className="bg-gray-800 text-white px-4 py-1.5 rounded-full text-xs font-medium tracking-wide animate-in fade-in slide-in-from-bottom-2">
+                MICROPHONE MUTED
+            </div>
+        )}
+
+        <div className="flex gap-6">
+            <button 
+                onClick={toggleMic}
+                className={`p-6 rounded-full shadow-lg transition-all duration-300 flex items-center justify-center ${
+                    micEnabled 
+                    ? 'bg-white hover:bg-gray-50 text-gray-800' 
+                    : 'bg-red-500 hover:bg-red-600 text-white shadow-red-200 ring-4 ring-red-100'
+                }`}
+            >
+                {micEnabled ? <Mic className="w-8 h-8" /> : <MicOff className="w-8 h-8" />}
+            </button>
+        </div>
       </div>
 
     </div>

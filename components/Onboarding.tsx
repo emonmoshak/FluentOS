@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { ArrowRight } from 'lucide-react';
 import { UserProfile, AppState } from '../types';
 
@@ -7,6 +7,8 @@ interface OnboardingProps {
   setAppState: (s: AppState) => void;
 }
 
+const LEVELS: UserProfile['level'][] = ['beginner', 'intermediate', 'advanced'];
+
 export const Onboarding: React.FC<OnboardingProps> = ({ setProfile, setAppState }) => {
   const [step, setStep] = useState(1);
   const [name, setName] = useState('');
@@ -14,7 +16,6 @@ export const Onboarding: React.FC<OnboardingProps> = ({ setProfile, setAppState 
   const [topic, setTopic] = useState('');
 
   const handleNext = () => {
-    // Add trim() to ensure we don't proceed with just spaces
     if (step === 1 && name.trim()) setStep(2);
     else if (step === 2) setStep(3);
     else if (step === 3 && topic.trim()) {
@@ -33,6 +34,35 @@ export const Onboarding: React.FC<OnboardingProps> = ({ setProfile, setAppState 
         handleNext();
     }
   };
+
+  // Handle keyboard navigation for Step 2
+  useEffect(() => {
+    if (step !== 2) return;
+
+    const handleLevelNav = (e: KeyboardEvent) => {
+        if (e.key === 'ArrowDown' || e.key === 'ArrowRight') {
+            e.preventDefault();
+            setLevel(prev => {
+                const idx = LEVELS.indexOf(prev);
+                const nextIndex = Math.min(idx + 1, LEVELS.length - 1);
+                return LEVELS[nextIndex];
+            });
+        } else if (e.key === 'ArrowUp' || e.key === 'ArrowLeft') {
+            e.preventDefault();
+            setLevel(prev => {
+                const idx = LEVELS.indexOf(prev);
+                const prevIndex = Math.max(0, idx - 1);
+                return LEVELS[prevIndex];
+            });
+        } else if (e.key === 'Enter') {
+            e.preventDefault();
+            setStep(3);
+        }
+    };
+
+    window.addEventListener('keydown', handleLevelNav);
+    return () => window.removeEventListener('keydown', handleLevelNav);
+  }, [step]);
 
   return (
     <div className="min-h-screen flex flex-col items-center justify-center bg-white p-6 text-center">
@@ -65,7 +95,7 @@ export const Onboarding: React.FC<OnboardingProps> = ({ setProfile, setAppState 
                     <div className="animate-in fade-in slide-in-from-bottom-4 duration-500">
                         <h2 className="text-3xl font-semibold text-gray-900 mb-8 lowercase">your english level?</h2>
                         <div className="flex flex-col gap-3">
-                            {(['beginner', 'intermediate', 'advanced'] as const).map((l) => (
+                            {LEVELS.map((l) => (
                                 <button
                                     key={l}
                                     onClick={() => setLevel(l)}
@@ -75,6 +105,7 @@ export const Onboarding: React.FC<OnboardingProps> = ({ setProfile, setAppState 
                                 </button>
                             ))}
                         </div>
+                        <p className="mt-4 text-xs text-gray-400">use ↑ ↓ keys to select</p>
                     </div>
                 )}
 

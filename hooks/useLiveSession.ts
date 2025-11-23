@@ -9,9 +9,10 @@ const MODEL_NAME = 'gemini-2.5-flash-native-audio-preview-09-2025';
 interface UseLiveSessionProps {
   userProfile: UserProfile;
   onDisconnect: () => void;
+  isMicOn: boolean;
 }
 
-export const useLiveSession = ({ userProfile, onDisconnect }: UseLiveSessionProps) => {
+export const useLiveSession = ({ userProfile, onDisconnect, isMicOn }: UseLiveSessionProps) => {
   const [isConnected, setIsConnected] = useState(false);
   const [isSpeaking, setIsSpeaking] = useState(false); // Model is speaking
   const [volume, setVolume] = useState(0); // For visualizer
@@ -30,10 +31,29 @@ export const useLiveSession = ({ userProfile, onDisconnect }: UseLiveSessionProp
   const nextStartTimeRef = useRef<number>(0);
   const sourcesRef = useRef<Set<AudioBufferSourceNode>>(new Set());
   const analyzerRef = useRef<AnalyserNode | null>(null);
+  const currentTranscriptRef = useRef<{ user: string, model: string }>({ user: '', model: '' });
+  
+  // State tracking refs to avoid stale closures in async callbacks
   const isConnectingRef = useRef(false);
+  const isConnectedRef = useRef(false);
+  const isUserDisconnectRef = useRef(false);
+
+  // Sync ref with state
+  useEffect(() => {
+      isConnectedRef.current = isConnected;
+  }, [isConnected]);
+
+  // Handle Mic Mute/Unmute
+  useEffect(() => {
+    if (streamRef.current) {
+      streamRef.current.getAudioTracks().forEach(track => {
+        track.enabled = isMicOn;
+      });
+    }
+  }, [isMicOn]);
 
   const disconnect = useCallback(() => {
-    // Reset connecting state immediately
+    isUserDisconnectRef.current = true;
     isConnectingRef.current = false;
 
     if (sessionPromiseRef.current) {
@@ -68,25 +88,27 @@ export const useLiveSession = ({ userProfile, onDisconnect }: UseLiveSessionProp
     }
 
     setIsConnected(false);
+    setIsSpeaking(false);
   }, []);
 
   const connect = useCallback(async () => {
-    // Prevent race conditions (Strict Mode or rapid retries)
-    if (isConnectingRef.current || isConnected) return;
+    // Use ref to check current status to prevent race conditions from stale closures
+    if (isConnectingRef.current || isConnectedRef.current) return;
     
     if (!API_KEY) {
-      setError("API Key not found in environment variables.");
+      setError("Configuration Error: API Key is missing in environment variables.");
       return;
     }
 
     isConnectingRef.current = true;
+    isUserDisconnectRef.current = false;
     setError(null);
+    currentTranscriptRef.current = { user: '', model: '' };
 
     try {
       const ai = new GoogleGenAI({ apiKey: API_KEY });
 
       // Initialize Audio Contexts
-      // Force 16kHz for input to match Gemini native requirements
       try {
           inputAudioContextRef.current = new (window.AudioContext || (window as any).webkitAudioContext)({ sampleRate: 16000 });
       } catch (e) {
@@ -96,22 +118,36 @@ export const useLiveSession = ({ userProfile, onDisconnect }: UseLiveSessionProp
       
       outputAudioContextRef.current = new (window.AudioContext || (window as any).webkitAudioContext)({ sampleRate: 24000 });
       
-      // Setup Analyzer for visualizer (output)
+      // Setup Analyzer for visualizer
       analyzerRef.current = outputAudioContextRef.current.createAnalyser();
       analyzerRef.current.fftSize = 32;
       analyzerRef.current.connect(outputAudioContextRef.current.destination);
 
-      // Get Mic Stream
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: {
-          sampleRate: 16000,
-          channelCount: 1,
-          echoCancellation: true,
-          autoGainControl: true,
-          noiseSuppression: true
-      }});
-      streamRef.current = stream;
+      // Get Mic Stream with robust error handling
+      let stream: MediaStream;
+      try {
+          stream = await navigator.mediaDevices.getUserMedia({ audio: {
+              sampleRate: 16000,
+              channelCount: 1,
+              echoCancellation: true,
+              autoGainControl: true,
+              noiseSuppression: true
+          }});
+          // Apply initial mute state
+          stream.getAudioTracks().forEach(track => track.enabled = isMicOn);
+          streamRef.current = stream;
+      } catch (err: any) {
+          let msg = "Failed to access microphone.";
+          if (err.name === 'NotAllowedError' || err.name === 'PermissionDeniedError') {
+              msg = "Microphone access denied. Please allow permission in your browser settings.";
+          } else if (err.name === 'NotFoundError' || err.name === 'DevicesNotFoundError') {
+              msg = "No microphone found. Please check your audio devices.";
+          } else if (err.name === 'NotReadableError' || err.name === 'TrackStartError') {
+              msg = "Microphone is in use by another application.";
+          }
+          throw new Error(msg);
+      }
 
-      // System Instruction
       const instruction = `
         You are "FluentOS", a fascinating, empathetic, and witty English conversation partner.
         The user's name is ${userProfile.name} (Level: ${userProfile.level}).
@@ -135,10 +171,8 @@ export const useLiveSession = ({ userProfile, onDisconnect }: UseLiveSessionProp
             setIsConnected(true);
             console.log("FluentOS Session Opened");
 
-            // Start Input Streaming
             if (!inputAudioContextRef.current || !streamRef.current) return;
             
-            // Resume context if suspended
             if (inputAudioContextRef.current.state === 'suspended') {
               await inputAudioContextRef.current.resume();
             }
@@ -146,7 +180,6 @@ export const useLiveSession = ({ userProfile, onDisconnect }: UseLiveSessionProp
             const source = inputAudioContextRef.current.createMediaStreamSource(streamRef.current);
             sourceNodeRef.current = source;
             
-            // 2048 buffer size for lower latency (approx 128ms at 16k)
             const processor = inputAudioContextRef.current.createScriptProcessor(2048, 1, 1);
             scriptProcessorRef.current = processor;
             
@@ -171,7 +204,6 @@ export const useLiveSession = ({ userProfile, onDisconnect }: UseLiveSessionProp
             processor.connect(inputAudioContextRef.current.destination);
           },
           onmessage: async (message: LiveServerMessage) => {
-            // Handle Audio Output
             const base64Audio = message.serverContent?.modelTurn?.parts?.[0]?.inlineData?.data;
             if (base64Audio && outputAudioContextRef.current) {
               setIsSpeaking(true);
@@ -211,7 +243,6 @@ export const useLiveSession = ({ userProfile, onDisconnect }: UseLiveSessionProp
               sourcesRef.current.add(source);
             }
 
-            // Handle Interruption
             if (message.serverContent?.interrupted) {
               sourcesRef.current.forEach(src => src.stop());
               sourcesRef.current.clear();
@@ -219,29 +250,54 @@ export const useLiveSession = ({ userProfile, onDisconnect }: UseLiveSessionProp
               setIsSpeaking(false);
             }
 
-            // Handle Transcriptions
-            if (message.serverContent?.modelTurn?.parts?.[0]?.text) {
-                 const text = message.serverContent.modelTurn.parts[0].text;
-                 setTranscripts(prev => [...prev, { text, isUser: false, timestamp: Date.now() }]);
+            // Accumulate transcripts
+            const outputText = message.serverContent?.outputTranscription?.text;
+            if (outputText) {
+                currentTranscriptRef.current.model += outputText;
+            }
+            
+            const inputText = message.serverContent?.inputTranscription?.text;
+            if (inputText) {
+                currentTranscriptRef.current.user += inputText;
+            }
+
+            // Commit transcripts on turn complete
+            if (message.serverContent?.turnComplete) {
+                const { user, model } = currentTranscriptRef.current;
+                if (user) {
+                    setTranscripts(prev => [...prev, { text: user, isUser: true, timestamp: Date.now() }]);
+                }
+                if (model) {
+                    setTranscripts(prev => [...prev, { text: model, isUser: false, timestamp: Date.now() }]);
+                }
+                currentTranscriptRef.current = { user: '', model: '' };
             }
           },
-          onclose: () => {
-            console.log("Session closed by server");
+          onclose: (e: any) => {
+            console.log("Session closed", e);
             setIsConnected(false);
             isConnectingRef.current = false;
+            
+            // Only set error if disconnect was NOT initiated by user
+            if (!isUserDisconnectRef.current) {
+                setError("Session disconnected unexpectedly. Please check your internet connection.");
+            }
           },
-          onerror: (e) => {
+          onerror: (e: any) => {
             console.error("FluentOS Live Error", e);
             isConnectingRef.current = false;
-            setError("Connection interrupted. Please retry.");
+            setIsConnected(false);
+            setError(e.message || "An unexpected connection error occurred.");
           }
         },
         config: {
           responseModalities: [Modality.AUDIO],
-          systemInstruction: instruction,
+          systemInstruction: { parts: [{ text: instruction }] },
           speechConfig: {
             voiceConfig: { prebuiltVoiceConfig: { voiceName: 'Puck' } } 
-          }
+          },
+          inputAudioTranscription: {},
+          outputAudioTranscription: {},
         }
       });
 
@@ -250,9 +306,9 @@ export const useLiveSession = ({ userProfile, onDisconnect }: UseLiveSessionProp
     } catch (err: any) {
       console.error("Connection initiation error", err);
       isConnectingRef.current = false;
-      setError(err.message || "Failed to connect");
+      setError(err.message || "Failed to initialize connection.");
     }
-  }, [userProfile]); // Removing isConnected dependency to allow retry logic to work cleanly
+  }, [userProfile, isMicOn]); // Added isMicOn to deps, though we largely rely on the effect for updates
 
   // Cleanup on unmount
   useEffect(() => {

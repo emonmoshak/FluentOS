@@ -1,3 +1,4 @@
+
 export enum AppState {
   LANDING = 'LANDING',
   ONBOARDING = 'ONBOARDING',
@@ -16,4 +17,9 @@ export interface TranscriptionItem {
   text: string;
   isUser: boolean;
   timestamp: number;
+}
+
+export interface SessionStats {
+  duration: number;
+  transcripts: TranscriptionItem[];
 }

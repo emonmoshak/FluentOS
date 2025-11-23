@@ -1,5 +1,6 @@
+
 import React, { useState } from 'react';
-import { AppState, UserProfile } from './types';
+import { AppState, UserProfile, SessionStats } from './types';
 import { Onboarding } from './components/Onboarding';
 import { Session } from './components/Session';
 import { Summary } from './components/Summary';
@@ -12,6 +13,7 @@ const App: React.FC = () => {
     level: 'intermediate',
     topic: ''
   });
+  const [sessionStats, setSessionStats] = useState<SessionStats | null>(null);
 
   const renderContent = () => {
     switch (appState) {
@@ -52,10 +54,18 @@ const App: React.FC = () => {
         return <Onboarding setProfile={setUserProfile} setAppState={setAppState} />;
       
       case AppState.SESSION:
-        return <Session userProfile={userProfile} setAppState={setAppState} />;
+        return <Session 
+          userProfile={userProfile} 
+          setAppState={setAppState} 
+          onSessionEnd={setSessionStats}
+        />;
 
       case AppState.SUMMARY:
-        return <Summary setAppState={setAppState} />;
+        return <Summary 
+          setAppState={setAppState} 
+          sessionStats={sessionStats}
+          userProfile={userProfile}
+        />;
 
       default:
         return <div>Error</div>;
