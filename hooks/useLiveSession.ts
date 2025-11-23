@@ -30,19 +30,63 @@ export const useLiveSession = ({ userProfile, onDisconnect }: UseLiveSessionProp
   const nextStartTimeRef = useRef<number>(0);
   const sourcesRef = useRef<Set<AudioBufferSourceNode>>(new Set());
   const analyzerRef = useRef<AnalyserNode | null>(null);
+  const isConnectingRef = useRef(false);
+
+  const disconnect = useCallback(() => {
+    // Reset connecting state immediately
+    isConnectingRef.current = false;
+
+    if (sessionPromiseRef.current) {
+      sessionPromiseRef.current.then((session: any) => {
+         try { session.close(); } catch(e) { console.warn("Failed to close session", e); }
+      }).catch(() => {});
+      sessionPromiseRef.current = null;
+    }
+    
+    sourcesRef.current.forEach(s => s.stop());
+    sourcesRef.current.clear();
+    
+    if (streamRef.current) {
+        streamRef.current.getTracks().forEach(track => track.stop());
+        streamRef.current = null;
+    }
+    if (scriptProcessorRef.current) {
+        try { scriptProcessorRef.current.disconnect(); } catch(e) {}
+        scriptProcessorRef.current = null;
+    }
+    if (sourceNodeRef.current) {
+        try { sourceNodeRef.current.disconnect(); } catch(e) {}
+        sourceNodeRef.current = null;
+    }
+    if (inputAudioContextRef.current && inputAudioContextRef.current.state !== 'closed') {
+        inputAudioContextRef.current.close();
+        inputAudioContextRef.current = null;
+    }
+    if (outputAudioContextRef.current && outputAudioContextRef.current.state !== 'closed') {
+        outputAudioContextRef.current.close();
+        outputAudioContextRef.current = null;
+    }
+
+    setIsConnected(false);
+  }, []);
 
   const connect = useCallback(async () => {
+    // Prevent race conditions (Strict Mode or rapid retries)
+    if (isConnectingRef.current || isConnected) return;
+    
     if (!API_KEY) {
       setError("API Key not found in environment variables.");
       return;
     }
 
+    isConnectingRef.current = true;
+    setError(null);
+
     try {
-      setError(null);
       const ai = new GoogleGenAI({ apiKey: API_KEY });
 
       // Initialize Audio Contexts
-      // Force 16kHz for input to match Gemini native requirements and reduce "Network Error" probability
+      // Force 16kHz for input to match Gemini native requirements
       try {
           inputAudioContextRef.current = new (window.AudioContext || (window as any).webkitAudioContext)({ sampleRate: 16000 });
       } catch (e) {
@@ -79,21 +123,22 @@ export const useLiveSession = ({ userProfile, onDisconnect }: UseLiveSessionProp
         1.  **BE HUMAN**: This is the most important rule. Use fillers like "hmm", "uh-huh", "you know", "I mean", "totally" naturally. 
         2.  **VARY YOUR TONE**: Be expressive! Whisper if it's a secret, sound excited if it's cool. Avoid monotonic delivery.
         3.  **BACKCHANNEL**: If the user is telling a long story, interject with short "wow", "really?", "no way" to show you are listening.
-        4.  **NO INTERROGATION**: Don't just ask questions. Share brief relevant anecdotes or opinions (invent them if needed to fit the persona) before passing the ball back.
-        5.  **LONG FORM**: Dig deep. If the topic is "Coffee", don't just ask "Do you like coffee?". Ask "What is that specific moment in the morning like when you take the first sip? Describe the smell."
+        4.  **NO INTERROGATION**: Don't just ask questions. Share brief relevant anecdotes or opinions before passing the ball back.
+        5.  **LONG FORM**: Dig deep.
       `;
 
       const sessionPromise = ai.live.connect({
         model: MODEL_NAME,
         callbacks: {
           onopen: async () => {
+            isConnectingRef.current = false;
             setIsConnected(true);
             console.log("FluentOS Session Opened");
 
             // Start Input Streaming
             if (!inputAudioContextRef.current || !streamRef.current) return;
             
-            // Resume context if suspended (browser autoplay policy)
+            // Resume context if suspended
             if (inputAudioContextRef.current.state === 'suspended') {
               await inputAudioContextRef.current.resume();
             }
@@ -101,7 +146,6 @@ export const useLiveSession = ({ userProfile, onDisconnect }: UseLiveSessionProp
             const source = inputAudioContextRef.current.createMediaStreamSource(streamRef.current);
             sourceNodeRef.current = source;
             
-            // Use ScriptProcessor for raw PCM access
             // 2048 buffer size for lower latency (approx 128ms at 16k)
             const processor = inputAudioContextRef.current.createScriptProcessor(2048, 1, 1);
             scriptProcessorRef.current = processor;
@@ -113,7 +157,6 @@ export const useLiveSession = ({ userProfile, onDisconnect }: UseLiveSessionProp
               const pcmBlob = createBlob(inputData, currentSampleRate);
               
               sessionPromise.then((session: any) => {
-                // Only send if we are still connected
                 if (session) {
                     try {
                         session.sendRealtimeInput({ media: pcmBlob });
@@ -150,7 +193,6 @@ export const useLiveSession = ({ userProfile, onDisconnect }: UseLiveSessionProp
               const source = ctx.createBufferSource();
               source.buffer = audioBuffer;
               
-              // Connect to analyzer for visualizer
               if (analyzerRef.current) {
                 source.connect(analyzerRef.current); 
               } else {
@@ -186,14 +228,12 @@ export const useLiveSession = ({ userProfile, onDisconnect }: UseLiveSessionProp
           onclose: () => {
             console.log("Session closed by server");
             setIsConnected(false);
-            // Only trigger disconnect navigation if it wasn't an error
-            // (We let the onError callback handle error states)
-            // If we close manually, we handle it elsewhere.
+            isConnectingRef.current = false;
           },
           onerror: (e) => {
             console.error("FluentOS Live Error", e);
+            isConnectingRef.current = false;
             setError("Connection interrupted. Please retry.");
-            // Do NOT call onDisconnect() here, so the user sees the error UI in the Session component
           }
         },
         config: {
@@ -209,39 +249,10 @@ export const useLiveSession = ({ userProfile, onDisconnect }: UseLiveSessionProp
 
     } catch (err: any) {
       console.error("Connection initiation error", err);
+      isConnectingRef.current = false;
       setError(err.message || "Failed to connect");
-      // Do not call onDisconnect() here to allow UI to show retry button
     }
-  }, [userProfile]);
-
-  const disconnect = useCallback(() => {
-    if (sessionPromiseRef.current) {
-      sessionPromiseRef.current.then((session: any) => {
-         try { session.close(); } catch(e) { console.warn("Failed to close session", e); }
-      }).catch(() => {});
-    }
-    
-    sourcesRef.current.forEach(s => s.stop());
-    sourcesRef.current.clear();
-    
-    if (streamRef.current) {
-        streamRef.current.getTracks().forEach(track => track.stop());
-    }
-    if (scriptProcessorRef.current) {
-        try { scriptProcessorRef.current.disconnect(); } catch(e) {}
-    }
-    if (sourceNodeRef.current) {
-        try { sourceNodeRef.current.disconnect(); } catch(e) {}
-    }
-    if (inputAudioContextRef.current && inputAudioContextRef.current.state !== 'closed') {
-        inputAudioContextRef.current.close();
-    }
-    if (outputAudioContextRef.current && outputAudioContextRef.current.state !== 'closed') {
-        outputAudioContextRef.current.close();
-    }
-
-    setIsConnected(false);
-  }, []);
+  }, [userProfile]); // Removing isConnected dependency to allow retry logic to work cleanly
 
   // Cleanup on unmount
   useEffect(() => {

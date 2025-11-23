@@ -14,11 +14,23 @@ export const Onboarding: React.FC<OnboardingProps> = ({ setProfile, setAppState 
   const [topic, setTopic] = useState('');
 
   const handleNext = () => {
-    if (step === 1 && name) setStep(2);
+    // Add trim() to ensure we don't proceed with just spaces
+    if (step === 1 && name.trim()) setStep(2);
     else if (step === 2) setStep(3);
-    else if (step === 3 && topic) {
-        setProfile({ name, level, topic });
+    else if (step === 3 && topic.trim()) {
+        setProfile({ 
+            name: name.trim(), 
+            level, 
+            topic: topic.trim() 
+        });
         setAppState(AppState.SESSION);
+    }
+  };
+
+  const handleKeyDown = (e: React.KeyboardEvent) => {
+    if (e.key === 'Enter') {
+        e.preventDefault();
+        handleNext();
     }
   };
 
@@ -41,6 +53,7 @@ export const Onboarding: React.FC<OnboardingProps> = ({ setProfile, setAppState 
                             type="text" 
                             value={name}
                             onChange={(e) => setName(e.target.value)}
+                            onKeyDown={handleKeyDown}
                             placeholder="type here..."
                             className="w-full p-4 text-xl border-b-2 border-gray-200 focus:border-yellow-400 outline-none text-center bg-transparent placeholder:text-gray-300"
                             autoFocus
@@ -73,6 +86,7 @@ export const Onboarding: React.FC<OnboardingProps> = ({ setProfile, setAppState 
                             type="text" 
                             value={topic}
                             onChange={(e) => setTopic(e.target.value)}
+                            onKeyDown={handleKeyDown}
                             placeholder="e.g. job interview, travel, daily life"
                             className="w-full p-4 text-xl border-b-2 border-gray-200 focus:border-yellow-400 outline-none text-center bg-transparent placeholder:text-gray-300"
                             autoFocus
@@ -83,7 +97,7 @@ export const Onboarding: React.FC<OnboardingProps> = ({ setProfile, setAppState 
                 <div className="mt-12 flex justify-center">
                     <button 
                         onClick={handleNext}
-                        disabled={(step === 1 && !name) || (step === 3 && !topic)}
+                        disabled={(step === 1 && !name.trim()) || (step === 3 && !topic.trim())}
                         className="w-16 h-16 rounded-full bg-black text-white flex items-center justify-center disabled:opacity-30 disabled:cursor-not-allowed hover:scale-105 transition-all shadow-lg"
                     >
                         <ArrowRight className="w-6 h-6" />
